@@ -1,0 +1,134 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%		  Created by: Andrew Schenck				 %
+%		University of Texas @ Arlington				 %
+%		        Version # 1.02					 %
+%									 %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Isis_Use_PHA_Grouping=1;
+variable flaggedRegs = fopen("errorlist_ftest.lis", "a");
+
+define runFits(eleNum, eleName, chi2_thresh, fprobMin, ftestParNum){
+
+	variable i = 0,j = 0, k = 0;	
+
+	variable cwd = getcwd();
+	%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	% CHANGE reg list to open %
+	%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	variable openRegs = fopen("regs_boxN_onlyPass.lis", "r");
+
+	variable regArr = fgetslines(openRegs);
+	variable lng = length(regArr);
+
+	%%%%%%%%%%%%%%%%%%%%%%%%%
+	% CHANGE SAVE NAME HERE %
+	%%%%%%%%%%%%%%%%%%%%%%%%%
+	variable fp = fopen("ftest_"+eleName+"_info.dat", "w");
+	variable flaggedRegs = String_Type[lng];
+
+	variable chi2_max = chi2_thresh + 0.1;
+
+	
+
+	for (i = 0; i < lng ; i++)
+	{
+		variable first,last,tmp,ext,newDir,infoForRes,infoForFtest,num_params,id,name;
+		variable nH,kT,net,O,Ne,Mg,Si,S,Fe,chi2;
+	
+		ext = regArr[i]; 				
+		tmp = sscanf(ext,"%s:%s", &first, &last); 	
+		first = strchop(first,'.',0); 			
+		j = i+1;
+	
+		name = string("Region_"+first[0]+"_combined_src_grp.pi");
+		newDir = (cwd + first[0]);
+		() = chdir(newDir);
+
+		() = load_data(name);
+		print("loaded $name"$);
+		if (i > 0){
+			delete_data(i);
+			delete_arf(i);
+			delete_rmf(i);
+		}
+
+		%%%%%%%%%%%%%%%
+		% EDIT These! %
+		%%%%%%%%%%%%%%%
+		notice(0.4,2.3,j);
+		load_par(newDir+"/ISM/ISMsave");
+
+		variable ftestVar = get_par(ftestParNum);
+		print("Ftest var min = $ftestVar"$);
+		
+		() = fit(&infoForRes);
+		variable redchi2_1 = infoForRes.statistic/(infoForRes.num_bins - infoForRes.num_variable_params);
+		variable chi2_1 = infoForRes.statistic;
+		variable dof_1 = infoForRes.num_bins - infoForRes.num_variable_params;	
+	
+		if (redchi2_1 > chi2_thresh){
+			if (redchi2_1 < chi2_max){	
+				print("Ftest starting soon, var min = $ftestVar"$);
+				variable x;
+				for (x = 0; x < length(eleNum); x++){
+					thaw(eleNum[x]);
+				}
+				() = fit();
+
+				try{
+					err("ftest_"+eleName);
+				}
+				catch AnyError:{
+					message ("*** Warning: failed to run error! ***");
+					() = fputslines(name, flaggedRegs);
+     				}
+				
+				() = fit(&infoForFtest);
+				variable redchi2_2 = infoForFtest.statistic/(infoForFtest.num_bins - infoForFtest.num_variable_params);
+				variable chi2_2 = infoForFtest.statistic;
+				variable dof_2 = infoForFtest.num_bins - infoForFtest.num_variable_params;
+				variable ftestVarThaw = get_par(ftestParNum);
+				print("Thawed value= $ftestVarThaw"$);
+	
+				variable fprob = ftest(chi2_2, dof_2, chi2_1, dof_1);
+				if (ftestVarThaw >= ftestVar){
+					if (fprob <= fprobMin){
+						print("Ftest significant! ($fprob < $fprobMin), flagged region"$);
+						flaggedRegs[i] = (first[0]+"\n");		
+					}
+					else print("Ftest NOT significant! ($fprob > $fprobMin)"$);
+				}
+				else print("Thawed ele val is LESS than fitted value! ($ftestVarThaw < $ftestVar"$);
+			}
+		}	
+	}
+
+	if (length (flaggedRegs) != fputslines (flaggedRegs, fp))
+	      throw WriteError;
+	() = fclose(fp);
+	print("Wrote Flagged Regions!");
+	print("Below should be the flagged regions in: ftest_"+eleName);
+	for (i = 0; i < length(flaggedRegs); i++){
+		if (flaggedRegs[i] != NULL) print(flaggedRegs[i]);
+	}
+
+	delete_data(lng);
+	delete_arf(lng);
+	delete_rmf(lng);
+}
+variable z;
+%%%%%%%%%%%%%%%%%%%%%%%
+% Edit these by hand! %
+%%%%%%%%%%%%%%%%%%%%%%%
+variable chi2s = [1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0];
+variable elesToThaw = [26];
+variable ftestParNum = 26;
+variable ftestProb = 0.0001;
+
+for (z = 0; z < length(chi2s); z++){
+
+	print("Running fits on chi^2 = "+string(chi2s[z]));
+	runFits(elesToThaw, "ISM_"+string(chi2s[z]), double(chi2s[z]), ftestProb, ftestParNum);
+}
+
+() = fclose(flaggedRegs);
