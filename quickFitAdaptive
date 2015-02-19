@@ -1,0 +1,95 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%		  Created by: Andrew Schenck				 %
+%		University of Texas @ Arlington				 %
+%		        Version # 1.02					 %
+%									 %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+variable i,j,k;
+
+variable cwd = getcwd();
+variable openRegs = fopen("regs_boxRot_1000_onlyPass.lis", "r");
+variable flaggedRegs = fopen("flaggedRegs_ISM.lis", "a");
+variable regArr = fgetslines(openRegs);
+variable lng = length(regArr);
+
+
+Isis_Use_PHA_Grouping=1;
+for (i = 0; i < lng ; i++)
+{
+	variable first,last,tmp,ext,newDir,info,num_params,fp,id,name;
+	variable nH,kT,net,O,Ne,Mg,Si,S,Fe,chi2;
+	
+	ext = regArr[i]; 	%set ext to the ith char in the reg array list
+	tmp = sscanf(ext,"%s:%s", &first, &last); 	%scan ext for the string and set
+	first = strchop(first,'.',0); 	%chop off the .reg par
+	%print(first);
+	j = i+1;
+	
+	name = string("Region_"+first[0]+"_combined_src_grp.pi");
+	%name = string("Region_"+first[0]+"_grp.pi");
+	newDir = (cwd + first[0]);
+	() = chdir(newDir);
+	%print(newDir);
+
+	() = load_data(name);
+	print("loaded $name"$);
+	if (i > 0){
+		delete_data(i);
+		delete_arf(i);
+		delete_rmf(i);
+	}
+	notice(1.3,5.0,j);
+	loadpar("isisPreloadLMCN49park");
+	() = fit();
+
+	try
+      	{
+        	err("ISMpark2");
+      	}
+     	catch AnyError:
+      	{
+        	message ("*** Warning: failed to run error on: " + name + " ISM");
+		() = fputslines(name, flaggedRegs);
+     	}
+	
+	
+	print("Finished: " + first[0]);
+	%print("Finished errors on $name"$);
+	
+
+	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	% here is where you should edit stuff, thaw or fix params 	%
+	% based on what you want					%
+	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	%thaw(26);
+	%thaw(27);
+	%thaw(28);
+	%thaw(29);
+	%thaw(33);
+	%() = fit();
+
+	%try
+      	%{
+		err("AT_OFrz");
+	%}
+	%catch AnyError:
+      	%{
+        	message ("*** Warning: failed to run error on: " + name + " AT_OFrz");
+		() = fputslines(name, flaggedRegs);
+     	%}
+	%print("Finished: " + first[0]);
+
+
+	%fixat(27,0.29);
+	%() = fit();
+	%err("AT_neFrz");
+
+
+	%thaw(27);
+	%fixat(26,0.11);
+	%() = fit();
+	%err("AT_oFrz");
+	
+}
+
+() = fclose(flaggedRegs);
