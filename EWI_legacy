@@ -1,0 +1,120 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%                  EWI script for ISIS 1.6.1                    %
+% ~Andrew Schenck, Univeristy of Texas at Arlington, 11-9-11    %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Name your center left and right images as follows: 		%
+%								%
+%			center img -> cent_smooth.fits  	%
+% 			left img -> left_smooth.fits   		%
+%                       right img -> right_smooth.fits  	%
+%								%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+variable i,j,k=0;
+
+
+variable lng;
+
+
+c = fits_open_file ("line.fits","r"),
+l = fits_open_file ("low.fits","r"),
+r = fits_open_file ("hi.fits","r");
+
+variable x = fits_read_key (c, "NAXIS1"), y = fits_read_key (c, "NAXIS2");
+variable cNrg = fits_read_key (c, "DSVAL14"),
+lNrg = fits_read_key (l, "DSVAL14"),
+rNrg = fits_read_key (r, "DSVAL14");
+
+variable cLo,cHi,lLo,lHi,rLo,rHi;
+variable cScan,lScan,rScan;
+
+
+cScan = sscanf (cNrg, "%f:%f", &cLo, &cHi);
+%print(cNrg);
+lScan = sscanf (lNrg, "%f:%f", &lLo, &lHi);
+%print(lNrg)
+rScan = sscanf (rNrg, "%f:%f", &rLo, &rHi);
+%print(rNrg);
+
+variable cont = fits_read_img (c), left = fits_read_img (l), right = fits_read_img (r);
+%print(cont);
+
+variable left_log = Double_Type [x,y],
+right_log = Double_Type [x,y],
+cont_log = Double_Type [x,y],
+cont_int = Double_Type [x,y],
+cont_ary = Double_Type [x,y],
+line = Double_Type [x,y],
+ewi = Double_Type [x,y];
+
+variable cenCenter = (cHi + cLo)/2,
+cenLeft = (lHi + lLo)/2,
+cenRight = (rHi + rLo)/2;
+print("");
+print("Left center: $cenLeft"$);
+print("Cent center: $cenCenter"$);
+print("Right center: $cenRight"$);
+
+variable centerLength = (cHi - cLo),
+leftLength = (lHi - lLo),
+rightLength = (rHi - rLo);
+print("");
+print("Left length: $leftLength"$);
+print("Center length: $centerLength"$);
+print("Right Length: $rightLength"$);
+print("");
+
+variable leftWeight = ((log(cenRight)-log(cenCenter))/(log(cenRight)-log(cenLeft)));
+print("Left weight: $leftWeight"$);
+variable rightWeight = ((log(cenCenter)-log(cenLeft))/(log(cenRight)-log(cenLeft)));
+print("Right weight: $rightWeight"$);
+print("");
+
+
+for (i = 0; i < x; i++)
+{
+	for (j = 0; j < y; j++)
+	{
+		if (left[i,j] > 0) left_log[i,j] = (rightWeight*(log(left[i,j]/leftLength)));
+		if (right[i,j] > 0) right_log[i,j] = (leftWeight*(log(right[i,j]/rightLength)));
+	}
+}
+print("first loop");
+
+cont_log = left_log + right_log;
+
+
+for (i = 0; i < x; i++){
+	for (j = 0; j < y; j++){
+		if (cont_log[i,j] != 0) cont_ary[i,j] = (exp(cont_log[i,j]));
+		%print(cont_ary[i,j]); for debug
+	}
+}
+print("second loop");
+
+cont_int = cont_ary*centerLength;
+
+for (i = 0; i < x; i++){
+	for (j = 0; j < y; j++){
+		if (cont[i,j] >= cont_int[i,j]) line[i,j] = (cont[i,j] - cont_int[i,j]);
+		%print(line[i,j]); for debug
+	}
+}
+print("third loop");
+
+for (i = 0; i < x; i++){
+	for (j = 0; j < y; j++){
+		if (cont_ary[i,j] > 0.000015) ewi[i,j] = (line[i,j] / cont_ary[i,j]);
+		%print(ewi[i,j]); for debug
+	}
+}
+print("writing img");
+
+variable t = fits_read_key (c, "OBJECT");
+t = t +"_"+cNrg+"_EWI.fits";
+
+fits_write_image_hdu (t,NULL,ewi);
+print("wrote img?");
+fits_close_file(c);
+fits_close_file(l);
+fits_close_file(r);
