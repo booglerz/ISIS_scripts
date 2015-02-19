@@ -1,0 +1,170 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%                  EWI script for ISIS 1.6.1   Version: 1.06    %
+% ~Andrew Schenck, Univeristy of Texas at Arlington, 11-9-11    %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Place the 3 files in a folder and make that folder your	%
+% current working directory.					%
+%			  					%
+% 			   					%
+%                        					%
+%								%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+variable i,j,k=0;
+variable lng;
+
+variable cwd = getcwd();  %gets cwd
+variable files = listdir(cwd);  %string array
+lng = length(files);
+print("Files in cwd");
+print(files);
+%print(lng);
+
+	
+variable file1 = files[0],file2 = files[1], file3 = files[2];
+variable c,l,r;
+
+%Finds DSTYP for energy and then sets the DSVAL
+print("Reading header to find energy");
+for (i = 0; i < 100; i++)
+{
+	variable j = "$i"$;
+	variable strng = fits_read_key(file1,"DSTYP"+j);
+
+	if (strng == "energy") {
+	print("found energy at DSTYP$j"$); 
+	variable DSVAL = "DSVAL$j"$;
+	break;}
+
+	else{ print("energy not found at DSTYP$j, moving on"$);}
+} 
+
+variable f1,f2,f3,f1Lo,f1Hi,f2Lo,f2Hi,f3Lo,f3Hi;
+
+f1 = fits_read_key(file1,DSVAL);
+f2 = fits_read_key(file2,DSVAL);
+f3 = fits_read_key(file3,DSVAL);
+
+f1 = sscanf (f1, "%f:%f", &f1Lo, &f1Hi);
+f2 = sscanf (f2, "%f:%f", &f2Lo, &f2Hi);
+f3 = sscanf (f3, "%f:%f", &f3Lo, &f3Hi);
+
+%print("f1Lo = $f1Lo , f2Lo = $f2Lo , f3Lo = $f3Lo"$); debug printline
+%Sorts through files to find correct energy sort, debug printing at end
+print("");
+print("Sorting files...");
+
+if (f1Lo < f2Lo){ if (f1Lo > f3Lo) { l = file3; c = file1; r=file2; print("Sort# 231");}
+		  else if (f2Lo < f3Lo) { l = file1; c = file2; r = file3; print("Sort# 123");}
+		  else{l = file1; c = file3; r = file2; print("Sort# 132");}
+}
+
+else { if (f1Lo < f3Lo) { l = file2; c = file1; r = file3; print("Sort# 213");}
+       else if (f2Lo < f3Lo) { l = file2; c = file3; r = file1; print("Sort# 321");}
+       else {l = file3; c = file2; r = file1; print("Sort# 312");}
+}
+
+variable checkC, checkL, checkR;
+
+checkL = fits_read_key (l, DSVAL);
+checkC = fits_read_key (c, DSVAL);
+checkR = fits_read_key (r, DSVAL);
+print("");
+print("lowEnergy = $checkL , centerEnergy = $checkC , hiEnergy = $checkR"$);
+print("leftFile = $l , centerFile = $c , rightFile = $r"$);
+
+
+variable y = fits_read_key (c, "NAXIS1"), x = fits_read_key (c, "NAXIS2");
+variable cNrg = fits_read_key (c, DSVAL),
+lNrg = fits_read_key (l, DSVAL),
+rNrg = fits_read_key (r, DSVAL);
+
+variable cLo,cHi,lLo,lHi,rLo,rHi;
+variable cScan,lScan,rScan;
+
+
+cScan = sscanf (cNrg, "%f:%f", &cLo, &cHi);
+%print(cNrg);
+lScan = sscanf (lNrg, "%f:%f", &lLo, &lHi);
+%print(lNrg)
+rScan = sscanf (rNrg, "%f:%f", &rLo, &rHi);
+%print(rNrg);
+
+variable cont = fits_read_img (c), left = fits_read_img (l), right = fits_read_img (r);
+%print(cont);
+
+variable left_log = Double_Type [x,y],
+right_log = Double_Type [x,y],
+cont_log = Double_Type [x,y],
+cont_int = Double_Type [x,y],
+cont_ary = Double_Type [x,y],
+line = Double_Type [x,y],
+ewi = Double_Type [x,y];
+
+variable cenCenter = (cHi + cLo)/2,
+cenLeft = (lHi + lLo)/2,
+cenRight = (rHi + rLo)/2;
+print("");
+print("Left center: $cenLeft"$);
+print("Cent center: $cenCenter"$);
+print("Right center: $cenRight"$);
+
+variable centerLength = (cHi - cLo),
+leftLength = (lHi - lLo),
+rightLength = (rHi - rLo);
+print("");
+print("Left length: $leftLength"$);
+print("Center length: $centerLength"$);
+print("Right Length: $rightLength"$);
+print("");
+
+variable leftWeight = ((log(cenRight)-log(cenCenter))/(log(cenRight)-log(cenLeft)));
+print("Left weight: $leftWeight"$);
+variable rightWeight = ((log(cenCenter)-log(cenLeft))/(log(cenRight)-log(cenLeft)));
+print("Right weight: $rightWeight"$);
+print("");
+
+for (i = 0; i < x; i++)
+{
+	for (j = 0; j < y; j++)
+	{
+		if (left[i,j] > 0) left_log[i,j] = (rightWeight*(log(left[i,j]/leftLength)));
+		if (right[i,j] > 0) right_log[i,j] = (leftWeight*(log(right[i,j]/rightLength)));
+	}
+}
+print("first loop");
+
+cont_log = left_log + right_log;
+
+
+for (i = 0; i < x; i++){
+	for (j = 0; j < y; j++){
+		if (cont_log[i,j] != 0) cont_ary[i,j] = (exp(cont_log[i,j]));
+		%print(cont_ary[i,j]); for debug
+	}
+}
+print("second loop");
+
+cont_int = cont_ary*centerLength;
+
+for (i = 0; i < x; i++){
+	for (j = 0; j < y; j++){
+		if (cont[i,j] >= cont_int[i,j]) line[i,j] = (cont[i,j] - cont_int[i,j]);
+		%print(line[i,j]); for debug
+	}
+}
+print("third loop");
+
+for (i = 0; i < x; i++){
+	for (j = 0; j < y; j++){
+		if (cont_ary[i,j] > 0.0001) ewi[i,j] = (line[i,j] / cont_ary[i,j]);
+		%print(ewi[i,j]); for debug
+	}
+}
+
+variable t = fits_read_key (c, "OBJECT");
+t = t +"_"+cNrg+"_EWI.fits";
+
+print("writing img $t to $cwd"$);
+fits_write_image_hdu (t,NULL,ewi);
+print("wrote img!");
