@@ -1,0 +1,455 @@
+% -*- slang -*-
+
+% Last Updated: Aug. 5, 2011
+
+Isis_Append_Semicolon=1;  %force semi-colon append
+Isis_Use_PHA_Grouping=1;  %force grpping use 
+
+% Make sure filenames and background file names get printed in list
+% functions 
+Isis_List_Filenames=1;
+
+
+putenv("PGPLOT_BACKGROUND=white"); % invert default for better view.
+putenv("PGPLOT_FOREGROUND=black");
+
+require("stats");
+require("xspec");
+xspec_xset ("NEIVERS","2.0");
+
+
+define isis_interactive_hook()
+{
+   _traceback=1;
+}
+
+%%% !!! %%% The path to my home directory.  %%% !!! %%%
+%%% !!! %%% CHANGE THIS PATH TO USE FOR YOUR HOME DIRECTORY %%% !!! %%%
+static variable path = ("/media/epic1/Andy/soft/isis/1.6.2/");
+static variable spath=("/home/andrews/");
+
+add_to_isis_load_path (spath+"/Desktop/isisScripts"); 
+
+require("Remeis_isisscripts");
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+() = evalfile(path+".isisrc_plots");  %needed to plot nice like xspec did%
+%
+() = evalfile(path+".isisrc_fitfun");
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Some useful aliasing (or simple functions akin to aliasing)
+
+alias("fit_fun","mo");  % Bowing to my XSPEC days ...
+alias("fit_counts","fit"); % Bowing to my XSPEC days ...
+alias("load_data","load");
+%alias("list_data","list");
+alias("edit_par","epar");
+alias("eval_counts","val");
+alias("list_par","list");
+
+
+variable lo,hi,specNum;
+%variable cwd = getcwd();
+
+public define notice()
+{
+	(lo,hi,specNum) = ();
+	notice_values(specNum,lo,hi;unit="kev");
+	xspec_xset ("NEIVERS","2.0");
+	() = eval_counts();
+}
+
+public define loadpar()
+{
+	variable inFile;
+	(inFile) = ();
+	load_par("/home/andrews/Desktop/isisParam/$inFile"$);
+	print("loaded $inFile"$);
+}
+
+public define fix(param)
+{
+	variable value = get_par(param);
+	set_par(param,value,1);
+	print("fixed $param to $value"$);
+}
+
+public define thaw(param) %should edit this to thaw multi if given
+{
+	variable value = get_par(param);
+	set_par(param,value,0);
+	print("thawed $param at $value"$);
+}
+
+public define fixat(param,value)
+{
+	set_par(param,value,1);
+	print("fixed $param to $value"$);
+
+}
+
+public define ftest(chi1,dof1,chi2,dof2){
+
+	variable tmp = 1;
+	variable ft, p;
+	
+	ft = ((chi1 - chi2) / (dof1 - dof2));
+	tmp = (chi1/(dof2 - (dof2 - dof1)));
+	
+	print("$ft / $tmp"$);
+	ft = ft/tmp;
+	print(ft);
+	p = f_cdf(ft,(dof2-dof1),dof2-(dof2-dof1));
+	p = 1.0 - p;
+	print("Your F Value = $ft with probability $p"$);
+	return p;
+}
+
+public define compute_sigma (n)
+{
+   variable sigma = Double_Type[length(n)];
+
+   variable j = where (n < 1.0);
+   if (length(j) > 0)
+     sigma[j] = 1.0;
+
+   variable i = where (n >= 1.0);
+   if (length(i) > 0)
+     sigma[i] = sqrt(n[i]);
+
+   return sigma;
+}
+
+public define resredchi2(info, elo, ehi, id)
+{
+	variable i, m, d, b, sigma, dchi2, num=0;
+	variable num_bins = info.num_bins;
+
+	m = _A(get_model_counts(id));
+	b = _A(get_back(id));
+	d = _A(get_data_counts(id));
+
+	variable m_new = Double_Type[num_bins];	m_new[*] = 0.0;
+	variable b_new = Double_Type[num_bins]; b_new[*] = 0.0;
+	variable d_new = Double_Type[num_bins]; d_new[*] = 0.0;
+	variable d_new_err = Double_Type[num_bins]; d_new_err[*] = 0.0;
+
+	variable chisqr = 0.0;
+
+	for (i = 0; i < num_bins; i++){
+
+		variable nrg = 0.5*(d.bin_lo + d.bin_hi);
+
+		%variable tmp = A[i];
+		if (nrg[i] > elo){
+			if (nrg[i] < ehi){
+				m_new[i] = m.value[i];
+				b_new[i] = b[i];
+				d_new[i] = d.value[i];
+				d_new_err[i] = d.err[i];
+				
+				num+=1;
+			}
+		}
+	}
+	
+	%print("num = $num"$);
+
+   	for (i = 0; i < num_bins; i++){
+		
+        	%if (b[i] == NULL)
+          	%	sigma = d_new_err[i];
+        	%else
+          	%	sigma = hypot (d_new_err[i], compute_sigma(b_new[i]));
+
+		if (d_new[i] != 0){
+			sigma = d_new_err[i];
+			dchi2 = (d_new[i] - m_new[i])^2 / sigma^2;
+        		chisqr += sum (dchi2);
+		}
+     	}
+	return (chisqr/num);
+}
+
+public define reschi2(info, elo, ehi, id)
+{
+	variable i, m, d, b, sigma, dchi2, num=0;
+	variable num_bins = info.num_bins;
+
+	m = _A(get_model_counts(id));
+	b = _A(get_back(id));
+	d = _A(get_data_counts(id));
+
+	variable m_new = Double_Type[num_bins];	m_new[*] = 0.0;
+	variable b_new = Double_Type[num_bins]; b_new[*] = 0.0;
+	variable d_new = Double_Type[num_bins]; d_new[*] = 0.0;
+	variable d_new_err = Double_Type[num_bins]; d_new_err[*] = 0.0;
+
+	variable chisqr = 0.0;
+
+	for (i = 0; i < num_bins; i++){
+
+		variable nrg = 0.5*(d.bin_lo + d.bin_hi);
+
+		%variable tmp = A[i];
+		if (nrg[i] > elo){
+			if (nrg[i] < ehi){
+				m_new[i] = m.value[i];
+				b_new[i] = b[i];
+				d_new[i] = d.value[i];
+				d_new_err[i] = d.err[i];
+				
+				num+=1;
+			}
+		}
+	}
+	
+	%print("num = $num"$);
+
+   	for (i = 0; i < num_bins; i++){
+		
+        	
+        	%if (b[i] == NULL)
+          	%	sigma = d_new_err[i];
+        	%else
+          	%	sigma = hypot (d_new_err[i], compute_sigma(b_new[i]));
+
+		if (d_new[i] != 0){
+			sigma = d_new_err[i];
+			dchi2 = (d_new[i] - m_new[i])^2 / sigma^2;
+        		chisqr += sum (dchi2);
+		}
+     	}
+	return chisqr;
+}
+
+
+
+public define plt()   %plot data 1 with res 1, just a faster way
+{
+	xlog;
+	ylog;
+	plot_data(specNum;res=1,xrange={lo,hi});
+}
+
+public define plt_lin()   %plot data 1 with res 1, just a faster way
+{
+	xlin;
+	ylog;
+	plot_data(specNum;res=1,xrange={lo,hi});
+}
+
+public define pltadd()
+{
+	xlin;
+	ylog;
+	plot_comps(specNum,popt,&plot_data;res=1,xrange={lo,hi});
+
+}
+
+public define nei()  %set NEI to 2.0
+{
+	xspec_xset ("NEIVERS","2.0");
+}
+
+public define err()  
+{
+	variable saveName,saveDir,cwd,info,id,flx;
+	cwd = getcwd();
+	print(cwd);
+
+	(saveName) = ();
+	saveDir = cwd+saveName;
+	print(saveDir);
+	() = mkdir(saveDir);
+	print("first err");
+	(,) = conf_loop();
+	print("re-fitting");
+	() = fit_counts();
+	print("2nd-error");
+	(,) = conf_loop(;save,prefix=saveDir+"/"+saveName);
+	print("error analysis complete!");
+
+	() = fit_counts(&info);
+	variable num_params = get_num_pars;
+	variable num_free_pars = info.num_variable_params;
+	variable in = info.statistic/(info.num_bins - info.num_variable_params); %chi^2/dof
+	variable bin = info.num_bins;
+	variable chi = info.statistic;
+	variable dof = (bin-num_free_pars);  %dof = bins - pars
+
+	%flx = pflux(lo,hi);
+
+	variable fp = fopen(saveDir+"/$saveName"$+"save", "a");
+	variable a = fputs("\nReduced Chi^2 = $in\n"$, fp);
+	variable b = fputs("Chi^2 = $chi\n"$, fp);
+	variable c = fputs("DoF = $dof\n"$, fp);
+	variable d = fputs("Bins = $bin\n"$, fp);
+	variable e = fputs("Num free pars = $num_free_pars\n"$, fp);
+	variable f = fputs("Num pars = $num_params\n"$, fp);
+	%fputs("pflux = $flx\n"$, fp);
+	
+	
+	() = fclose(fp);
+	
+	() = chdir(saveDir);
+	id = plot_open("$saveName"$+".ps/cps");
+	xlog;
+	ylog;
+	plot_data(specNum;res=1,xrange={lo,hi});
+	plot_close(id);
+	print("saved plot");
+	() = chdir(cwd);
+}
+
+
+public define err1sig()  
+{
+	variable saveName,saveDir,cwd,info,id,flx;
+	cwd = getcwd();
+	print(cwd);
+
+	(saveName) = ();
+	saveDir = cwd+saveName;
+	print(saveDir);
+	() = mkdir(saveDir);
+	(,) = conf_loop(,0;save,prefix=saveDir+"/"+saveName);
+	print("ran errors?");
+
+	() = fit_counts(&info);
+	variable num_params = get_num_pars;
+	variable num_free_pars = info.num_variable_params;
+	variable in = info.statistic/(info.num_bins - info.num_variable_params); %chi^2/dof
+	variable bin = info.num_bins;
+	variable chi = info.statistic;
+	variable dof = (bin-num_free_pars);  %dof = bins - pars
+
+	%flx = pflux(lo,hi);
+
+	variable fp = fopen(saveDir+"/$saveName"$+"save", "a");
+	variable a = fputs("\nReduced Chi^2 = $in\n"$, fp);
+	variable b = fputs("Chi^2 = $chi\n"$, fp);
+	variable c = fputs("DoF = $dof\n"$, fp);
+	variable d = fputs("Bins = $bin\n"$, fp);
+	variable e = fputs("Num free pars = $num_free_pars\n"$, fp);
+	variable f = fputs("Num pars = $num_params\n"$, fp);
+	
+	() = fclose(fp);
+	
+	() = chdir(saveDir);
+	id = plot_open("$saveName"$+".ps/cps");
+	xlog;
+	ylog;
+	plot_data(specNum;res=1,xrange={lo,hi});
+	plot_close(id);
+	print("saved plot");
+	() = chdir(cwd);
+}
+
+public define err2()  
+{
+	variable saveName,saveDir,cwd,info,id,flx;
+	cwd = getcwd();
+	print(cwd);
+
+	(saveName) = ();
+	saveDir = cwd+saveName;
+	print(saveDir);
+	mkdir(saveDir);
+	(,) = conf_loop(;save,prefix=saveDir+"/"+saveName);
+	print("ran errors?");
+
+	() = fit_counts(&info);
+	variable num_params = get_num_pars;
+	variable num_free_pars = info.num_variable_params;
+	variable in = info.statistic/(info.num_bins - info.num_variable_params); %chi^2/dof
+	variable bin = info.num_bins;
+	variable chi = info.statistic;
+	variable dof = (bin-num_free_pars);  %dof = bins - pars
+
+	%flx = pflux(lo,hi);
+
+	variable fp = fopen(saveDir+"/$saveName"$+"save", "a");
+	fputs("\nReduced Chi^2 = $in\n"$, fp);
+	fputs("Chi^2 = $chi\n"$, fp);
+	fputs("DoF = $dof\n"$, fp);
+	fputs("Bins = $bin\n"$, fp);
+	fputs("Num free pars = $num_free_pars\n"$, fp);
+	fputs("Num pars = $num_params\n"$, fp);
+	%fputs("pflux = $flx\n"$, fp);
+	
+	
+	() = fclose(fp);
+	
+	() = chdir(saveDir);
+	id = plot_open("$saveName"$+".ps/cps");
+	xlog;
+	ylog;
+	plot_data(specNum;res=1,xrange={lo,hi});
+	plot_close(id);
+	print("saved plot");
+	() = chdir(cwd);
+
+	return chi,dof;
+}
+
+public define marxflux()
+{
+	variable egrid, par_file;
+
+	(par_file, egrid) = ();
+	variable out_file = "$par_file"$ + "_flux.tbl";
+  
+	variable lgrid = NULL;
+	variable script = NULL;
+	variable use_bin_integral = 0;
+	
+	egrid = eval(egrid);		
+
+	load_par (par_file);
+	variable egrid_hi = shift (egrid, 1);
+	egrid_hi[-1] = egrid_hi[-2] + (egrid[-1]-egrid[-2]);
+
+	variable s = eval_fun (_A(egrid, egrid_hi));
+	if (use_bin_integral == 0)
+  		s = reverse(s)/(egrid_hi-egrid);
+
+	writecol (out_file, egrid, s);
+	print("Wrote : $out_file!"$);
+}
+
+
+public define newpar()     % Still Further bowing to my XSPEC days ...
+{
+   variable idx, value, freeze, min, max;
+   switch(_NARGS)
+   {
+    case 2:
+    (idx,value) = ();
+    set_par(idx,value);
+    return;
+   }
+   {
+    case 3:
+    (idx,value,freeze) = ();
+    if(freeze < 0){ freeze = 1; } % This is the XSPEC part
+    set_par(idx,value,freeze);
+    return;
+   }
+   {
+    case 4:
+    (idx,value,freeze,min) = ();
+    if(freeze < 0){ freeze = 1; } % This is the XSPEC part
+    set_par(idx,value,freeze,min);
+    return;
+   }
+   {
+    case 5:
+    (idx,value,freeze,min,max) = ();
+    if(freeze < 0){ freeze = 1; } % This is the XSPEC part
+    set_par(idx,value,freeze,min,max);
+    return;
+   }
+}
