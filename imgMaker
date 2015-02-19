@@ -1,0 +1,349 @@
+#!/usr/bin/env python
+
+"""
+Script:
+
+imgMaker
+
+"""
+
+__version__ = "CIAO 4.6"
+
+toolname = "imgMaker"
+
+import os, sys
+import shutil
+import fileinput
+import math
+import numpy as np
+import pyfits
+
+
+
+def FindCD(SNRcenX, SNRcenY, delX, delY, eleArr, chi2thresh):
+
+	# We will start from the img center (which should be close to the SNR center, if not we shold make this just take in SNR center
+	# We will then search outwards from the center, pixel by pixel to find where the chi2 'turns bad', this should trace the ejcta
+	#
+	# We will check 8 directions, N S E WE and the 45o between them (NE NW SE SW)
+	wrkDir = os.getcwd()
+	CDlocDir = wrkDir + "/CDlocationFiles"
+	if(os.path.isdir(CDlocDir)): print("Directory found! " + str(CDlocDir) + ", will save files here!")
+	else:
+		os.mkdir(CDlocDir)
+		print("made new dir: " + str(CDlocDir))
+
+	tmpArr = np.zeros(shape=(10000,10000)) #not sure about this size, just big to start
+
+	startX = SNRcenX
+	startY = SNRcenY
+
+	print("SNR center ~ (x,y): " + str(startX) +"," + str(startY))
+	print("SRN radius ~ " + str(delX))
+
+	CDlocWrite = open(CDlocDir+'/CDloc.dat','w')
+	CDlocWrite.write("SNR center ~ (x,y): " + str(startX) +"," + str(startY)+'\n')
+	CDlocWrite.write("SRN radius ~ X:" + str(delX)+ " Y:" + str(delY)+ '\n')
+
+	regWritePoly = open(CDlocDir+'/CDloc_Poly.reg', 'w')
+	regWriteAll = open(CDlocDir+'/CDloc_ALLREGS.reg', 'w')
+	CDlocWrite.write("Quad 1\n")
+	regWritePoly.write('# Region file format: CIAO version 1.0\n')
+	regWriteAll.write('# Region file format: CIAO version 1.0\n')
+
+	
+	#Quad 1 & 4
+	# Initialize variables
+	m = [0,1,-1]
+	direc = ['West','Northwest','Southwest']
+	i = 0
+	cdLoc = 0
+	tmp = []
+	tmpList = []
+	tmpXY = []
+	tmpAllRegs = []
+	y = startY
+	for z in range(len(m)):
+		CDlocWrite.write('----------------------------------------------------------------------\n')
+		CDlocWrite.write('Z = '+str(direc[z])+'\n')
+		CDlocWrite.write('----------------------------------------------------------------------\n')
+		print("Z = " + str(direc[z]))
+		for x in range(startX, startX+delX):
+			y +=m[z]
+			#NOTE: this is backwards, since in the main script I wrote from (0,0) being the bottom left corner, everything is backwards (i.e. (y,x)... :(
+			tmpArr[x][y] = eleArr[y][x]
+			#print('('+str(x)+','+str(y)+') = ' + str(eleArr[y][x]))
+			if (eleArr[y][x] != 0):
+				tmpList.append(float(eleArr[y][x]))
+				tmpXY.append(str(x)+','+str(y))
+				if (eleArr[y][x] < chi2thresh):
+					if (i == 0): 
+						cdLoc = math.sqrt((SNRcenX - x)**2 + (SNRcenY - y)**2)
+						CDlocWrite.write("Possible CD location @ (x,y) = ("+str(x)+","+str(y)+") = " + str(cdLoc) + " pixels = " + " parsecs\n")	
+						print("Possible CD @ (x,y) = ("+str(x)+","+str(y)+") = " + str(cdLoc))
+						# Get centers of each direction
+						tmp.append(str(x)+','+str(y))
+
+						#write all regs to a file
+						tmpAllRegs.append('circle('+str(SNRcenX)+','+str(SNRcenY)+','+str(cdLoc)+')')
+						tmpAllRegs.append('circle('+str(x)+','+str(y)+','+str(5)+') # color=red')
+
+						# Write individual files for completness
+						regWriteCen = open(CDlocDir+'/CDloc_fromCenter_'+str(direc[z])+'.reg', 'w')
+						regWrite = open(CDlocDir+'/CDloc_'+str(direc[z])+'.reg', 'w')
+						regWriteCen.write('# Region file format: CIAO version 1.0\n')
+						regWrite.write('# Region file format: CIAO version 1.0\n')
+						regWriteCen.write('circle('+str(SNRcenX)+','+str(SNRcenY)+','+str(cdLoc)+')')
+						regWrite.write('circle('+str(x)+','+str(y)+','+str(5)+')')
+						regWriteCen.close()
+						i += 1
+		if(cdLoc == 0): 
+			CDlocWrite.write("NO CD FOUND!\n")
+			lowIndex = tmpList.index(min(tmpList))
+			print("lowIndex = " + str(lowIndex))
+			tmp.append(tmpXY[lowIndex])
+			print("NO CD FOUND! Lowest value in this direction: " + str(tmpXY[lowIndex]) + " = " + str(min(tmpList)))		
+					
+
+		if (cdLoc != 0):
+			fracOfSNRrad = float(cdLoc/(delX))
+			print("Fraction of radius %:  = " + str(fracOfSNRrad)+"%")
+			CDlocWrite.write("Fraction of radius %:  = " + str(fracOfSNRrad)+"%\n")
+	
+		i = 0
+		y = startY
+		tmpList = []
+		tmpXY = []
+		cdLoc = 0
+
+	#Reset variables
+	m = [0,1,-1]
+	direc = ['East','Northeast','Southeast']
+	#quad 2 & 3
+	for z in range(len(m)):
+		CDlocWrite.write('----------------------------------------------------------------------\n')
+		CDlocWrite.write('Z = '+str(direc[z])+'\n')
+		CDlocWrite.write('----------------------------------------------------------------------\n')
+		print("Z = " + str(direc[z]))
+		for x in range(startX, startX-delX, -1):
+			y +=m[z]
+			#NOTE: this is backwards, since in the main script I wrote from (0,0) being the bottom left corner, everything is backwards (i.e. (y,x)... :(
+			tmpArr[x][y] = eleArr[y][x]
+			tmpXY.append(str(x)+','+str(y))
+			#print('('+str(x)+','+str(y)+') = ' + str(eleArr[y][x]))
+			if (eleArr[y][x] != 0):
+				tmpList.append(float(eleArr[y][x]))
+				if (eleArr[y][x] < chi2thresh):
+					if (i == 0): 
+						cdLoc = math.sqrt((SNRcenX - x)**2 + (SNRcenY - y)**2)
+						CDlocWrite.write("Possible CD location @ (x,y) = ("+str(x)+","+str(y)+") = " + str(cdLoc) + " pixels = " + " parsecs\n")	
+						print("Possible CD @ (x,y) = ("+str(x)+","+str(y)+") = " + str(cdLoc))
+						# Get centers of each direction
+						tmp.append(str(x)+','+str(y))
+
+						#write all regs to a file
+						tmpAllRegs.append('circle('+str(SNRcenX)+','+str(SNRcenY)+','+str(cdLoc)+')')
+						tmpAllRegs.append('circle('+str(x)+','+str(y)+','+str(5)+') # color=red')
+
+
+						# Write individual files for completness
+						regWriteCen = open(CDlocDir+'/CDloc_fromCenter_'+str(direc[z])+'.reg', 'w')
+						regWrite = open(CDlocDir+'/CDloc_'+str(direc[z])+'.reg', 'w')
+						regWriteCen.write('# Region file format: CIAO version 1.0\n')
+						regWrite.write('# Region file format: CIAO version 1.0\n')
+						regWriteCen.write('circle('+str(SNRcenX)+','+str(SNRcenY)+','+str(cdLoc)+')')
+						regWrite.write('circle('+str(x)+','+str(y)+','+str(5)+')')
+						regWriteCen.close()
+						i += 1	
+		if(cdLoc == 0): 
+			CDlocWrite.write("NO CD FOUND!\n")
+			lowIndex = tmpList.index(min(tmpList))
+			print("lowIndex = " + str(lowIndex))
+			tmp.append(tmpXY[lowIndex])
+			print("NO CD FOUND! Lowest value in this direction: " + str(tmpXY[lowIndex]) + " = " + str(min(tmpList)))					
+					
+
+		if(cdLoc != 0):
+			fracOfSNRrad = float(cdLoc/(delX))
+			print("Fraction of radius %:  = " + str(fracOfSNRrad)+"%")
+			CDlocWrite.write("Fraction of radius %:  = " + str(fracOfSNRrad)+"%\n")
+	
+		i = 0
+		y = startY
+		tmpList = []
+		tmpXY = []
+		cdLoc = 0
+
+
+	#Reset variables
+	cdLoc = 0
+	m = [1,-1]
+	direc = ['North','South']
+	cdLoc = 0
+	#North and South
+	for z in range(len(m)):
+		CDlocWrite.write('----------------------------------------------------------------------\n')
+		CDlocWrite.write('Z = '+str(direc[z])+'\n')
+		CDlocWrite.write('----------------------------------------------------------------------\n')
+		print("Z = " + str(direc[z]))
+		for y in range(startY, startY+m[z]*delY, m[z]):
+			x = startX
+			#NOTE: this is backwards, since in the main script I wrote from (0,0) being the bottom left corner, everything is backwards (i.e. (y,x)... :(
+			tmpArr[x][y] = eleArr[y][x]
+			#print('('+str(x)+','+str(y)+') = ' + str(eleArr[y][x]))
+			if (eleArr[y][x] != 0):
+				tmpList.append(float(eleArr[y][x]))
+				tmpXY.append(str(x)+','+str(y))
+				if (eleArr[y][x] < chi2thresh):
+					if (i == 0): 
+						cdLoc = math.sqrt((SNRcenX - x)**2 + (SNRcenY - y)**2)
+						CDlocWrite.write("Possible CD location @ (x,y) = ("+str(x)+","+str(y)+") = " + str(cdLoc) + " pixels = " + " parsecs\n")	
+						print("Possible CD @ (x,y) = ("+str(x)+","+str(y)+") = " + str(cdLoc))
+						# Get centers of each direction
+						tmp.append(str(x)+','+str(y))
+
+						#write all regs to a file
+						tmpAllRegs.append('circle('+str(SNRcenX)+','+str(SNRcenY)+','+str(cdLoc)+')')
+						tmpAllRegs.append('circle('+str(x)+','+str(y)+','+str(5)+') # color=red')
+
+
+						# Write individual files for completness
+						regWriteCen = open(CDlocDir+'/CDloc_fromCenter_'+str(direc[z])+'.reg', 'w')
+						regWrite = open(CDlocDir+'/CDloc_'+str(direc[z])+'.reg', 'w')
+						regWriteCen.write('# Region file format: CIAO version 1.0\n')
+						regWrite.write('# Region file format: CIAO version 1.0\n')
+						regWriteCen.write('circle('+str(SNRcenX)+','+str(SNRcenY)+','+str(cdLoc)+')')
+						regWrite.write('circle('+str(x)+','+str(y)+','+str(5)+')')
+						regWriteCen.close()
+						i += 1	
+		if(cdLoc == 0): 
+			CDlocWrite.write("NO CD FOUND!\n")
+			lowIndex = tmpList.index(min(tmpList))
+			print("lowIndex = " + str(lowIndex))
+			tmp.append(tmpXY[lowIndex])
+			print("NO CD FOUND! Lowest value in this direction: " + str(tmpXY[lowIndex]) + " = " + str(min(tmpList)))					
+					
+
+		if(cdLoc != 0):
+			fracOfSNRrad = float(cdLoc/(delX))
+			print("Fraction of radius %:  = " + str(fracOfSNRrad)+"%")
+			CDlocWrite.write("Fraction of radius %:  = " + str(fracOfSNRrad)+"%\n")
+	
+		i = 0
+		y = startY
+		tmpList = []
+		tmpXY = []
+
+
+
+	#Write out all info to one region file
+	# W NW SW E NE SE N S
+	# 0 1 6 4 3 7 5 2
+	print("tmp " + str(tmp))
+	line = "polygon("+tmp[0]+","+tmp[1]+","+tmp[6]+","+tmp[4]+","+tmp[3]+","+tmp[5]+","+tmp[7]+","+tmp[2]+")"
+	regWritePoly.write(line)
+
+	for i in range(len(tmpAllRegs)):
+		regWriteAll.write(tmpAllRegs[i]+'\n')
+	
+	regWritePoly.close()
+	CDlocWrite.close()
+	regWriteAll.close()
+	print('Wrote regFile for this location and for center location and for ALL locations: CDloc_quad1_'+str(z)+' and CDloc_'+str(z) +' CDlocALL.reg')
+	
+
+#MAIN#
+def imgMaker(args):
+	"""Run the tool"""
+	""" reg: Input region file list		ele: Input ele values		locCD: 1=yes 0=no"""
+	(reg, ele, locCD) = ('regs_noRot.lis','ISMandy.dat', 0) 	# Insert files by hand!
+	
+	regArr = []
+	eleArr = []
+	newEleArr = np.zeros(shape=(7000,7000)) # Start new array at all zeros (5k x 5k) should be big enough?
+	SNRcenX = 0
+	SNRcenY = 0
+	# Setup arrays from input files
+	for line in fileinput.input(reg):
+		regArr.append(line.rstrip())
+
+	for line in fileinput.input(ele):
+		eleArr.append(line.rstrip())
+
+	# Search for lowest X and lowest Y and highest X and Y (to make a smaller img and to use for finding CD (could just get this from box.reg...)
+	lowX = 100000
+	lowY = 100000
+	maxX = 0
+	maxY = 0
+
+	for i in range(len(regArr)):
+
+		#posInfo = [line.strip('rotbox()') for line in open(regArr[i])]
+		posInfo = regArr[i].strip('rotbox()')
+		posInfoSplit = posInfo.strip()
+		posInfoSplit = posInfo.split(',')
+
+		cenX = float(posInfoSplit[0])
+		cenY = float(posInfoSplit[1])
+		delX = float(posInfoSplit[2])
+		delY = float(posInfoSplit[3])
+
+		if ((cenX - delX/2.0) < lowX): lowX = (cenX - delX/2.0)
+		if ((cenY - delY/2.0) < lowY): lowY = (cenY - delY/2.0)
+		if ((cenX + delX/2.0) > maxX): maxX = (cenX + delX/2.0)
+		if ((cenY + delY/2.0) > maxY): maxY = (cenY + delY/2.0)
+	SNRcenX = ((maxX + lowX)/2.0)
+	SNRcenY = ((maxY + lowY)/2.0)
+	print("lowX: " + str(lowX) + " __ lowY: " + str(lowY) + " __ maxX: " + str(maxX) + " __ maxY: " + str(maxY))
+	xRad = (maxX - lowX)
+	yRad = (maxY - lowY)
+	print("SNR center: ("+str(SNRcenX)+","+str(SNRcenY)+")")
+
+	newEleArr = np.zeros(shape=(7000,7000))
+	eleName = str(ele).rstrip('.dat')+'_ciao.fits'
+
+	for x in range(len(regArr)):
+
+		print("Working on region: " + str(regArr[x]) + " with eleValue: " + str(eleArr[x]))
+		posInfo = regArr[x].strip('rotbox()')
+		posInfoSplit = posInfo.strip()
+		posInfoSplit = posInfo.split(',')
+
+		#print("posInfo split = " +str(posInfoSplit[0]))
+		
+		cenX = float(posInfoSplit[0])
+		cenY = float(posInfoSplit[1])
+		delX = float(posInfoSplit[2])
+		delY = float(posInfoSplit[3])
+
+		blhcX = (float(cenX) - (float(delX)/2.0))
+		blhcY = (float(cenY) - (float(delY)/2.0))
+
+		startX = float(blhcX)
+		startY = float(blhcY)
+		maxX = float(startX + delX) 
+		maxY = float(startY + delY)	
+		#print("starting at: " + str(startX)+","+str(startY))
+		#print("ending at: " + str(maxX)+","+str(maxY))
+		#startX = int(blhcX)
+		#startY = int(blhcY)
+		#maxX = int(startX + delX)
+		#maxY = int(startY + delY)
+
+		for y in range(startX,maxX):
+			for z in range(startY,maxY):
+				# Note, this is backwards (y,x) if we flip it the display is reversed... will need to check this out
+				newEleArr[z][y] = eleArr[x]
+				
+	print("Writing img! : " + str(eleName))
+	ELE = pyfits.PrimaryHDU(newEleArr)
+	ELE.writeto(eleName)
+	if (locCD == 1): FindCD(int(SNRcenX), int(SNRcenY), int(xRad/2), int(yRad/2), newEleArr, 1.5)
+
+
+
+	
+if __name__ == "__main__":
+	imgMaker(sys.argv)
+
+quit()
