@@ -1,0 +1,109 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%		  Created by: Andrew Schenck				 %
+%		University of Texas @ Arlington				 %
+%		        Version # 1.02					 %
+%									 %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+variable i,j,k;
+
+variable cwd = getcwd();
+variable openRegs = fopen("regs.lis", "r");
+variable regArr = fgetslines(openRegs);
+variable lng = length(regArr);
+
+variable fp = fopen("flaggedRegions_Ores", "w");
+variable flaggedRegs = String_Type[lng];
+
+Isis_Use_PHA_Grouping=1;
+for (i = 0; i < lng ; i++)
+{
+	variable first,last,tmp,ext,newDir,infoForRes,num_params,fp,id,name;
+	variable nH,kT,net,O,Ne,Mg,Si,S,Fe,chi2;
+
+	variable Ores, NeRes, NeResWing, MgRes, SiRes;
+	
+	
+	
+	ext = regArr[i]; 	%set ext to the ith char in the reg array list
+	tmp = sscanf(ext,"%s:%s", &first, &last); 	%scan ext for the string and set
+	first = strchop(first,'.',0); 	%chop off the .reg par
+	%print(first);
+	j = i+1;
+	
+	name = string("Region_"+first[0]+"_combined_src_grp.pi");
+	newDir = (cwd + first[0]);
+	() = chdir(newDir);
+	%print(newDir);
+
+	() = load_data(name);
+	print("loaded $name"$);
+	if (i > 0){
+		delete_data(i);
+		delete_arf(i);
+		delete_rmf(i);
+	}
+	notice(0.4,2.3,j);
+	load_par(newDir+"/ISM/ISMsave");
+	() = fit(&infoForRes);
+	variable redchi2 = infoForRes.statistic/(infoForRes.num_bins - infoForRes.num_variable_params);
+	%err("ISM");
+	%print("Finished: " + first[0]);
+	%print("Finished errors on $name"$);
+	
+	if (redchi2 > 1.3){
+		Ores = resredchi2(infoForRes, 0.55, 0.7, j);
+		NeRes = resredchi2(infoForRes, 0.9, 1.05, j);
+		NeResWing = resredchi2(infoForRes, 1.05, 1.2, j);
+		MgRes = resredchi2(infoForRes, 1.35, 1.48, j);
+		SiRes = resredchi2(infoForRes, 1.7, 1.9, j);
+	
+		if (NeRes > 2.0*Ores){
+			flaggedRegs[i] = first[0];
+			print("NeRes > Ores! Flagged region!");
+		}
+		if (NeResWing > 2.0*Ores){
+			flaggedRegs[i] = first[0];
+			print("NeResWing > Ores! Flagged region!");
+		}
+		if (MgRes > 2.0*Ores){
+			flaggedRegs[i] = first[0];
+			print("MgRes > Ores! Flagged region!");
+		}
+		if (SiRes > 2.0*Ores){
+			flaggedRegs[i] = first[0];
+			print("SiRes > Ores! Flagged region!");
+		}	
+	}
+	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	% here is where you should edit stuff, thaw or fix params 	%
+	% based on what you want					%
+	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	%thaw(26);
+	%thaw(27);
+	%thaw(28);
+	%thaw(29);
+	%thaw(33);
+	%() = fit();
+	%err("AT_OFrz");
+	%print("Finished: " + first[0]);
+
+
+	%fixat(27,0.29);
+	%() = fit();
+	%err("AT_neFrz");
+
+
+	%thaw(27);
+	%fixat(26,0.11);
+	%() = fit();
+	%err("AT_oFrz");
+	
+}
+if (length (flaggedRegs) != fputslines (flaggedRegs, fp))
+      throw WriteError;
+() = fclose(fp);
+print("Wrote Flagged Regions!");
+print("Below should be the flagged regions");
+for (i = 0; i < length(flaggedRegs); i++){
+	if (flaggedRegs[i] != NULL) print(flaggedRegs[i]);
+}
