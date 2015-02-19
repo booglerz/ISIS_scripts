@@ -1,0 +1,188 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%		  Created by: Andrew Schenck				 %
+%		University of Texas @ Arlington				 %
+%		        Version # 2.22					 %
+%									 %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+variable i,j,k,ii;
+
+variable cwd = getcwd();
+variable openRegs = fopen("panSW_pie6reg.lis", "r");
+variable regArr = fgetslines(openRegs);
+variable lng = length(regArr);
+
+variable nameArr = ["O","Ne","Mg","Si","Fe"];
+variable thawedPar = [-1,-1,-1,-1,-1];
+variable numArr = [44,45,46,47,51]; %edit for num eles to check
+variable numL = length(numArr);
+
+variable oChi = 100.0;
+variable nChi = 100.0;
+variable thwChi = 100.0;
+variable oDoF = 100.0;
+variable nDoF = 100.0;
+variable thwDoF = 100.0;
+variable lowpos = 0;
+variable p = 0.0;
+variable ft = 0.0;
+variable fThresh = 0.001;
+
+
+variable initArr = [0.03406908,0.0505825,0.08982141,0.4443867,0.04529885];
+
+
+Isis_Use_PHA_Grouping=1;
+require("stats");
+
+
+define ftest(chi1,dof1,chi2,dof2){
+
+	variable tmp = 1;
+	
+	ft = ((chi1 - chi2) / (dof1 - dof2));
+	tmp = (chi1/(dof2 - (dof2 - dof1)));
+	
+	print("$ft / $tmp"$);
+	ft = ft/tmp;
+	print(ft);
+	p = f_cdf(ft,(dof2-dof1),dof2-(dof2-dof1));
+	p = 1.0 - p;
+	print("Your F Value = $ft with probability $p"$);
+	return p;
+}
+
+
+
+define check(oChi,oDoF,nChi,nDoF,pos,logF){
+
+	variable strF;
+	print("Running FTest on $nChi , $nDoF : $oChi , $oDoF "$);
+	strF= ("Running FTest on $nChi , $nDoF : $oChi , $oDoF \n"$);
+	fputslines(strF,logF);
+	(p) = ftest(nChi,nDoF,oChi,oDoF);
+
+	if((oChi/oDoF) >= 1.6){fThresh = 0.01;}		 %if the redChi^2 is kinda big, lower the thresh
+	else{fThresh = 0.001;}				 % else put it back to 0.001
+
+	if(p > fThresh){				%same fit, freeze param and move on.
+		set_par(numArr[pos],initArr[pos],1);
+
+		print("$p > $fThresh, Froze param: Moving on..."$);
+		print(numArr[pos]);
+
+		strF = ("$p > $fThresh, Froze param: Moving on...\n"$);
+		fputslines(strF,logF);
+		strF = ("-------------------------------------------------------------------\n");
+		fputslines(strF,logF);
+
+		k = pos;} 	
+	
+	else{	%fit is statistically different, set the old stuff to this stuff for next fit	
+		oChi = nChi;
+		oDoF = nDoF;
+		lowpos = ii;
+		thawedPar[pos] = 1;				 %get the position of it
+								%print and log it
+		strF = ("$p < $fThresh\n"$);
+		fputslines(strF,logF);
+		print("Found new lowest chi^2@: $lowpos"$);
+		print("Set $oDoF and $oChi"$);
+		strF = ("Found new lowest chi^2@: $lowpos\n"$);
+		fputslines(strF,logF);
+		strF = ("Set $oDoF and $oChi \n"$);
+		fputslines(strF,logF);
+		strF = ("-------------------------------------------------------------------\n");
+		fputslines(strF,logF);
+
+		k = -1;}	
+	return k,oChi,oDoF,lowpos;				%reset for loop, return either the new chi/dof or the old chi/dof
+}
+
+
+
+%main
+mkdir("tmpFF");			%change to new folders , you will over write!
+
+for (i = 0; i < lng ; i++)	%this controls the looping over the region files
+{
+	variable first,last,tmp,ext,newDir,info,num_params,fp,ofp,nfp,lines2,id,lowposStr,logF;
+	
+	ext = regArr[i]; 			  %set ext to the ith char in the reg array list
+	tmp = sscanf(ext,"%s:%s", &first, &last); %scan ext for the string and set
+	first = strchop(first,'.',0); 	          %chop off the .reg par
+	
+	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	j = i+1;
+	ii = 1;
+	thawedPar = [-1,-1,-1,-1,-1]; 		%re-initialize everything!
+	oChi = 0.0;
+	nChi = 0.0;
+	oDoF = 0;
+	nDoF = 0;
+	fThresh = 0.001;
+	lowpos = 0;
+
+	newDir = (cwd + first[0]);
+	chdir(newDir);
+	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	%ftest(59.87,40,71.36,41);		%7.67 p = 0.008~ just a check for ftest math
+	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+	
+	load("DaTa.pi");
+	if (i > 0){delete_data(i);}
+	notice(0.3,2.3,j);
+	loadpar("isisPreloadSMCthaw");
+	fit();
+	(thwChi,thwDoF) = err2("allThaw");		%First fit is always all param thaw
+	thwDoF = int(thwDoF);
+
+	loadpar("isisPreloadSMC");
+	fit();
+	(oChi,oDoF) = err2("allFrz");		%all param frz, get first low chi^2 and dof
+	oDoF = int(oDoF);
+
+	logF = fopen(newDir+"/ProcessLog","a");		%create file for logging
+	
+	
+	%this makes it smart (run through the diff eles)
+	for(k = 0; k < numL ; k++){
+		print("k = $k"$);		
+		if(thawedPar[k] < 0){					%check for reset
+
+			thaw(numArr[k]); 				%Thaw next ele
+			%list_par();
+			fit();
+			(nChi,nDoF) = err2("$ii"$); 		        %get new chi2
+			nDoF = int(nDoF);
+			(k,oChi,oDoF,lowpos) = check(oChi,oDoF,nChi,nDoF,k,logF);}    	%Pass check the F value, and the 2 dofs and position
+
+			oChi = oChi;
+			oDoF = oDoF;
+			lowpos = lowpos;
+			
+			ii++;
+	}    
+	if (lowpos < 1){
+ 		variable tmpP = ftest(oChi,oDoF,thwChi,thwDoF);  	%do Ftest between allfrz and allthaw
+		if (tmpP < fThresh){lowpos = "allThaw";}
+		else{lowpos = "allFrz";}}
+			
+	lowposStr = "$lowpos"$+"save";
+	print("Saving str:" + lowposStr);
+	fputslines("Saving str:" + lowposStr,logF);
+
+	%here we will copy the lowest chi2 save file to a new dir and rename it
+	ofp = fopen(newDir+"/"+"$lowpos"$+"/"+lowposStr, "r");        %open old
+	lines2 = fgetslines(ofp);					   %get lines
+	nfp = fopen(cwd+"/tmpFF/"+first[0],"a");		           %make new file (Reg_save)
+	fputslines(lines2, nfp);					   %write to it
+	fclose(ofp);
+	fclose(nfp);
+	fclose(logF);
+	print("Saved file: $lowposStr"$);
+	print("moving to next region");
+	
+	
+}
